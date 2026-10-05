@@ -19,7 +19,7 @@ from probe.profile_log import record
 EXTRA_TOKENS = 512
 
 
-def profile_transformers_class(load_in_4bit: bool = True):
+def profile_transformers_class(load_in_4bit: bool = True, ask_for_profile: bool = True):
     """Build the wrapper class. Imported lazily so torch is only loaded when needed.
 
     Their loader calls `from_pretrained` with no dtype, which gives full precision: an 8B
@@ -55,8 +55,10 @@ def profile_transformers_class(load_in_4bit: bool = True):
                 self.obtain_max_new_tokens(answers=answers)
             else:
                 self.max_new_token = 512
-            self.max_new_token += EXTRA_TOKENS
-            print(f"{model_name} loaded | max new tokens {self.max_new_token}")
+            if ask_for_profile:
+                self.max_new_token += EXTRA_TOKENS
+            print(f"{model_name} loaded | max new tokens {self.max_new_token} | "
+                  f"profile question {'on' if ask_for_profile else 'off'}")
 
         def _as_chat(self, prompt: str) -> str:
             """Wrap the prompt in the model's chat format when it has one.
@@ -93,8 +95,13 @@ def profile_transformers_class(load_in_4bit: bool = True):
             generated = outputs[0][inputs["input_ids"].shape[-1]:]
             reply = self.tokenizer.decode(generated, skip_special_tokens=True)
 
-            answer, profile = parse_reply(reply)
-            record(input_variables, profile, reply)
+            if ask_for_profile:
+                answer, profile = parse_reply(reply)
+                record(input_variables, profile, reply)
+            else:
+                # Baseline mode: their task, their prompt, their parsing. Nothing is asked
+                # for beyond the answer, so this measures the model without the probe.
+                answer = reply
 
             # Only the answer goes back, so their parser sees what it always saw.
             # Token probabilities are not computed: they are used only by the input
@@ -104,11 +111,17 @@ def profile_transformers_class(load_in_4bit: bool = True):
     return ProfileTransformersLLM
 
 
-def install(load_in_4bit: bool = True) -> type:
-    """Point the tester at the wrapper. Call once, before running a GPU experiment."""
+def install(load_in_4bit: bool = True, ask_for_profile: bool = True) -> type:
+    """Point the tester at the wrapper. Call once, before running a GPU experiment.
+
+    `ask_for_profile=False` keeps the quantised loader and the chat template, which their
+    adapter lacks, but asks nothing extra and logs nothing. That is the control run: the
+    difference between it and a probe run is what the extra question costs this model.
+    """
     import prediction_inconsistency.prediction_inconsistency_tester as tester
 
-    wrapper = profile_transformers_class(load_in_4bit=load_in_4bit)
+    wrapper = profile_transformers_class(load_in_4bit=load_in_4bit,
+                                         ask_for_profile=ask_for_profile)
     tester.TransformersCodeLLM = wrapper
     print(f"tester will now build {wrapper.__name__} for GPU runs")
     return wrapper

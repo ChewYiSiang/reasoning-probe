@@ -101,24 +101,35 @@ def main() -> None:
 
     truth = load_truth(args.truth)
     code_index = {value["code"]: key for key, value in truth.items() if value["code"]}
-    predictions = load_predictions(args.probe_log)
     answers = read_results_csv(args.results_csv) if args.results_csv else {}
+
+    # Index the replies by task, then walk the ground truth rather than the replies, so a
+    # task whose reply never arrived is counted as unscored instead of quietly shrinking
+    # the denominator. This is the same fix as in audit.py.
+    replies: dict[str, dict] = {}
+    for prediction in load_predictions(args.probe_log):
+        key = code_index.get(prediction["full_sol"])
+        if key is not None and key[1] == args.version:
+            replies[key[0]] = prediction
 
     correct = Counter()
     total = Counter()
     by_answer = defaultdict(lambda: [0, 0])      # answer verdict -> [wrong profiles, profiles]
     per_program = Counter()
 
-    for prediction in predictions:
-        key = code_index.get(prediction["full_sol"])
-        if key is None or key[1] != args.version:
+    for (task_id, version), entry in truth.items():
+        if version != args.version:
             continue
-        task_id = key[0]
-        real = truth[key]["counts"]
+        real = entry["counts"]
         if not real:
             continue                              # straight-line program, nothing to read
 
-        features = construct_features(truth[key]["code"])
+        prediction = replies.get(task_id)
+        if prediction is None:
+            per_program["programs with no reply"] += 1
+            continue
+
+        features = construct_features(entry["code"])
         claimed = {name: tuple(value) for name, value in prediction["profile"].items()}
 
         program_wrong = False
@@ -147,9 +158,10 @@ def main() -> None:
     for label in sorted(total, key=lambda l: (-total[l], l)):
         print(f"  {label.ljust(width)}  {rate(correct[label], total[label])}")
 
-    print(f"\n=== per program ===")
+    programs = sum(per_program.values())
+    print(f"\n=== per program ({programs} programs with at least one construct) ===")
     for label, count in sorted(per_program.items()):
-        print(f"  {label:26s} {count}")
+        print(f"  {label:26s} {rate(count, programs)}")
 
     if by_answer:
         print(f"\n=== profile errors, split by whether the answer was right ===")

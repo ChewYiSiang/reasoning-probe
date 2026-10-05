@@ -79,18 +79,35 @@ def profile_text(prediction: dict | None) -> str:
     return json.dumps(prediction.get("profile", {}), sort_keys=True)
 
 
-def construct_accuracy(predictions: list[dict], truth: dict, code_index: dict) -> Counter:
-    """Per-construct correctness, split by whether the input exercised the construct."""
-    stats = Counter()
+def construct_accuracy(predictions: list[dict], truth: dict, code_index: dict,
+                       version: str | None = None) -> Counter:
+    """Per-construct correctness, split by whether the input exercised the construct.
+
+    Counted over every construct in the ground truth, not only over constructs whose reply
+    arrived, so a task with no usable reply shows up as "reply missing" instead of quietly
+    shrinking the denominator.
+    """
+    replies: dict[tuple[str, str], dict] = {}
     for prediction in predictions:
         key = code_index.get(prediction["full_sol"])
-        if key is None:
+        if key is not None:
+            replies[key] = prediction
+
+    stats = Counter()
+    for key, entry in truth.items():
+        if version is not None and key[1] != version:
             continue
-        real = truth[key]["counts"]
-        claimed = {name: tuple(value) for name, value in prediction["profile"].items()}
+        real = entry["counts"]
+        if not real:
+            continue
+        prediction = replies.get(key)
+        claimed = ({name: tuple(value) for name, value in prediction["profile"].items()}
+                   if prediction else None)
         for name, counts in real.items():
             bucket = "exercised" if any(c > 0 for c in counts) else "never ran"
-            if name not in claimed:
+            if claimed is None:
+                stats[f"{bucket}: reply missing"] += 1
+            elif name not in claimed:
                 stats[f"{bucket}: not answered"] += 1
             elif claimed[name] == counts:
                 stats[f"{bucket}: correct"] += 1
@@ -134,7 +151,8 @@ def main() -> None:
 
     print("=== profile accuracy, baseline ===")
     base_predictions = [p for p in base_profiles.values()]
-    for key, value in sorted(construct_accuracy(base_predictions, truth, code_index).items()):
+    for key, value in sorted(construct_accuracy(base_predictions, truth, code_index,
+                                                "no_mutation").items()):
         print(f"  {key:28s} {value}")
 
     for mutation in args.mutations:
@@ -203,7 +221,8 @@ def main() -> None:
                                 table[(False, True)], table[(True, True)]).replace("\n", "\n  "))
 
         print(f"\n  profile accuracy, {mutation}:")
-        for key, value in sorted(construct_accuracy(list(profiles.values()), truth, code_index).items()):
+        for key, value in sorted(construct_accuracy(list(profiles.values()), truth,
+                                                    code_index, mutation).items()):
             print(f"    {key:28s} {value}")
 
 

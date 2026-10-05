@@ -242,3 +242,129 @@ neither of which needs the code to be run.
 A profile disagreement should come out at precision 1.0: the mutation is
 semantics-preserving, so the execution is identical in both versions, and two different
 accounts of it cannot both be right.
+
+
+## Comparing a mutant against its original
+
+Mutation does not leave the set of measurable constructs alone: `ast.unparse` expands a
+one-liner, so a construct that could not be measured in the original becomes measurable in
+the mutant. Comparing raw totals therefore mixes the effect of the rewriting with a change
+in what is being counted.
+
+    python -m probe.audit --truth results/truth/cruxeval.jsonl \
+        --probe-dir results/qwen --compare sequential constant_unfold_add
+
+This runs over the tasks the mutation applies to, and within those only the constructs
+present in both versions, so the only difference between the two columns is the rewriting.
+It also reports how many constructs were dropped for not being in both.
+
+
+## Do different models fail on the same constructs?
+
+Three error rates say how often each model is wrong, not whether they are wrong about the
+same things. A construct that defeats every model is a property of the construct, which is
+more useful to report than three percentages.
+
+    python -m probe.overlap --truth results/truth/cruxeval.jsonl \
+        --model deepseek results/probe/profiles_no_mutation.jsonl \
+        --model qwen14b results/qwen14b/profiles_no_mutation.jsonl \
+        --model qwen8b results/qwen/profiles_no_mutation.jsonl
+
+Constructs a model did not answer are left out of its column, so a missing reply never
+counts as a mistake.
+
+
+## Recording what a run was
+
+Results folders accumulate, and the conditions do not survive in anyone's memory: which
+model, 4-bit or not, probe on or off, and which version of the ground truth it was scored
+against. One call at the end of a run writes that down.
+
+    from probe.manifest import write
+    write(RESULTS, "sequential", model=MODEL, probe=True,
+          quantisation="4-bit", max_new_tokens=576, tasks_requested=800,
+          truth="/content/truth_cruxeval.json")
+
+Or afterwards, from the command line:
+
+    python -m probe.manifest results/qwen14b --mutation no_mutation sequential \
+        --model Qwen/Qwen2.5-Coder-14B-Instruct --truth results/truth/cruxeval.jsonl \
+        --quantisation 4-bit --probe
+
+The entry records the date, the outcome counts read from the CSV, and a SHA-256 of the
+truth file. That last one matters: the ground truth has already changed twice, and a
+re-score against a different version would move every number with nothing to say why.
+
+
+## Data flow: how many times each variable changed
+
+The control-flow side asks which way execution went and how often. This asks what happened
+to the values, at the same level of detail, so the same parsing, scoring and error
+categories apply.
+
+Build the ground truth (a second tracing pass; about a second for 800 programs):
+
+    python -m probe.dataflow build --truth results/truth/cruxeval.jsonl \
+        --source mongo --limit 800 --out results/truth/writes.jsonl
+
+The build reports how many variables were seen, how many are worth asking about and how
+many questions it will ask, so it doubles as the feasibility check: if few variables
+survive, the question is not worth running.
+
+A variable is dropped when it is written once (the answer is trivially 1) or when it is a
+loop variable, whose count is that loop's iteration count by construction. Everything else
+is kept, including a list built by `append` inside a loop. At most three variables are asked
+about per program, to keep replies short and scoring exact.
+
+Then run with `WritesPrompt` in place of `ProfilePrompt`, and score:
+
+    python -m probe.dataflow score --writes results/truth/writes.jsonl \
+        --log results/qwen14b/profiles_no_mutation.jsonl --version no_mutation
+
+
+## The second task: input prediction
+
+MuCoCo's input prediction gives the model a program, an input and an output, and asks
+whether that input produces that output. The probe attaches unchanged, because the program
+and the input are both in the prompt.
+
+    python -m probe.input_prediction --truth results/truth/cruxeval.jsonl \
+        --results-dir results/qwen14b_input --probe-dir results/qwen14b_input
+
+Read the result with its ceiling in mind: the answer is True or False, so two wrong answers
+are always identical and MuCoCo's incorrectness-based inconsistency can never fire. The task
+is run to show the profile signal transfers, not to produce a large answer-inconsistency
+rate. Their own figure for it is the lowest of their four tasks.
+
+## Re-asking when the two profiles disagree
+
+The mitigation that needs nothing executed, so it still applies without a test suite and
+under mutations that change behaviour.
+
+    python -m probe.retry --truth results/truth/cruxeval.jsonl \
+        --results-dir results/qwen --probe-dir results/qwen \
+        --mutation sequential --out results/retry_prompts.jsonl
+
+That writes one prompt per flagged pair, each showing the model its own two contradictory
+answers before repeating the original question. Run those prompts, then score:
+
+    python -m probe.retry --truth results/truth/cruxeval.jsonl \
+        --results-dir results/qwen --probe-dir results/qwen \
+        --mutation sequential --after results/retry_results.csv
+
+A plain re-ask at temperature 0 would return the same answer, so the prompt has to differ:
+showing the model its own contradiction is what makes the second generation a different one.
+
+
+## Before a full operator sweep: count it first
+
+MuCoCo skips a task when an operator does not apply, so a sweep of all eleven costs far
+less than eleven times the benchmark. This counts the valid mutants locally, without
+calling a model, and prices the run from speeds measured on our own runs.
+
+    python -m probe.dry_run --source mongo --limit 800
+
+Add `--no-probe` to price an answers-only sweep, and `--models qwen14b llama` to change
+which speeds are used. It also names the operators whose mutants cannot be compared
+construct by construct: for2while and for2enumerate turn a for loop into a while, so the
+ids no longer line up. Profile accuracy still works for them; profile consistency does not.
