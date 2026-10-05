@@ -368,3 +368,24 @@ Add `--no-probe` to price an answers-only sweep, and `--models qwen14b llama` to
 which speeds are used. It also names the operators whose mutants cannot be compared
 construct by construct: for2while and for2enumerate turn a for loop into a while, so the
 ids no longer line up. Profile accuracy still works for them; profile consistency does not.
+
+
+## When the mutant cannot be matched by its code
+
+Scoring normally regenerates each mutant locally and matches it to the logged reply by
+program text. That requires the two copies to be character-identical, which fails for
+`random`: its renaming picks fresh names on every run, so the model saw one program and
+the truth builder traced another.
+
+The log already holds the exact program in the prompt and the exact input, so the tracer
+can run those instead:
+
+    python -m probe.truth_from_log --log results/llama_sweep/profiles_random.jsonl \
+        --version random --out results/truth/random_from_log.jsonl
+
+    python -m probe.audit --truth results/truth/random_from_log.jsonl \
+        --probe-dir results/llama_sweep --versions random
+
+The output is the same shape as `build_truth_mucoco` writes, so every scoring tool reads
+it unchanged. This is also the route for mutations that change behaviour, where the
+original's counts do not apply to the mutant at all.

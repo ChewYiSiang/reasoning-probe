@@ -19,6 +19,25 @@ from probe.profile_log import record
 EXTRA_TOKENS = 512
 
 
+# model name and precision -> (tokenizer, model), so a session loads each model once
+_LOADED: dict = {}
+
+
+def free_models() -> None:
+    """Drop the cached models and give the memory back, for switching model mid-session."""
+    import gc
+
+    _LOADED.clear()
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def profile_transformers_class(load_in_4bit: bool = True, ask_for_profile: bool = True):
     """Build the wrapper class. Imported lazily so torch is only loaded when needed.
 
@@ -39,17 +58,28 @@ def profile_transformers_class(load_in_4bit: bool = True, ask_for_profile: bool 
             # Deliberately not calling their __init__: the model has to be loaded with a
             # dtype it can fit in. Everything else below mirrors what they do.
             self.model_name = model_name
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-            options = {"device_map": "auto"}
-            if load_in_4bit and torch.cuda.is_available():
-                from transformers import BitsAndBytesConfig
-                options["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
-            elif torch.cuda.is_available():
-                options["torch_dtype"] = torch.float16
+            # One copy per model for the whole session. The tester builds a fresh wrapper
+            # for every run, and loading the weights again each time fills the card: five
+            # runs of an 8B model in 4-bit is enough to exhaust 22 GB, because nothing
+            # releases the previous copy.
+            cached = _LOADED.get((model_name, load_in_4bit))
+            if cached is not None:
+                self.tokenizer, self.model = cached
+                print(f"{model_name} reused from this session")
+            else:
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-            self.model = AutoModelForCausalLM.from_pretrained(model_name, **options)
+                options = {"device_map": "auto"}
+                if load_in_4bit and torch.cuda.is_available():
+                    from transformers import BitsAndBytesConfig
+                    options["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
+                elif torch.cuda.is_available():
+                    options["torch_dtype"] = torch.float16
+
+                self.model = AutoModelForCausalLM.from_pretrained(model_name, **options)
+                _LOADED[(model_name, load_in_4bit)] = (self.tokenizer, self.model)
 
             if answers is not None:
                 self.obtain_max_new_tokens(answers=answers)

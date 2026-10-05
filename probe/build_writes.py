@@ -8,9 +8,11 @@ answers against it. Both are reached through `python -m probe.dataflow`.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
-from probe.dataflow import checklist, informative, parse_writes, score, write_counts
+from probe.dataflow import (checklist, coincidental, informative, parse_writes, score,
+                            write_counts)
 from probe.score import load_predictions, load_truth
 from probe.stats import rate
 
@@ -55,11 +57,17 @@ def build_writes(args) -> None:
                 skipped += 1
                 continue
             useful = informative(counts, truth[key]["counts"], code)
+            asked = checklist(useful)
+            # A count that happens to equal a figure the control-flow side already reports
+            # is still informative, but a model guessing from the loop counts would get it
+            # right, so the share is recorded and reported rather than quietly ignored.
+            lucky = coincidental({name: useful[name] for name in asked}, truth[key]["counts"])
             entry["versions"][version] = {
                 "code": code,
                 "all_writes": counts,
                 "informative": useful,
-                "asked": checklist(useful),
+                "asked": asked,
+                "guessable_from_the_loop_counts": sorted(lucky),
             }
             traced += 1
         if entry["versions"]:
@@ -71,13 +79,23 @@ def build_writes(args) -> None:
         for row in rows:
             handle.write(json.dumps(row) + "\n")
 
-    asked = sum(len(v["asked"]) for row in rows for v in row["versions"].values())
-    every = sum(len(v["all_writes"]) for row in rows for v in row["versions"].values())
-    useful = sum(len(v["informative"]) for row in rows for v in row["versions"].values())
+    versions = [v for row in rows for v in row["versions"].values()]
+    asked = sum(len(v["asked"]) for v in versions)
+    every = sum(len(v["all_writes"]) for v in versions)
+    useful = sum(len(v["informative"]) for v in versions)
+    lucky = sum(len(v["guessable_from_the_loop_counts"]) for v in versions)
+    nothing = sum(1 for v in versions if not v["asked"])
+    spread = Counter(len(v["asked"]) for v in versions)
+
     print(f"traced {traced} versions across {len(rows)} tasks ({skipped} could not be traced)")
     print(f"  variables seen:                  {every}")
     print(f"  carrying new information:        {rate(useful, every)}")
     print(f"  asked about (at most 3 a task):  {asked}")
+    print(f"  versions with no question to ask: {rate(nothing, len(versions))}")
+    print(f"  questions per version:           "
+          + ", ".join(f"{count}: {spread[count]}" for count in sorted(spread)))
+    print(f"  of those asked, how many a model could get right by guessing from the loop "
+          f"counts: {rate(lucky, asked)}")
     print(f"written to {out}")
 
 
