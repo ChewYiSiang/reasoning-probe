@@ -598,6 +598,10 @@ def test_write_count_question_and_scoring_round_trip():
 
     text = section(["found", "out"])
     assert "found = ?" in text and "out = ?" in text
+    # the model has to be told to write the answer section too, or it answers only the
+    # question we appended and the whole run scores near zero
+    assert "### ANSWER" in text
+    assert text.index("### ANSWER") < text.index("### WRITES")
 
     reply = "### ANSWER\n(1, [5])\n\n### WRITES\nfound = 2\nout = 3\n"
     assert parse_writes(reply) == {"found": 2, "out": 3}
@@ -721,3 +725,166 @@ def test_truth_from_log_traces_programs_no_local_copy_can_match(tmp_path):
     assert entry["counts"]["loop1"] == (3,)     # three items
     assert entry["counts"]["if1"] == (2, 1)     # two positive, one not
     assert entry["code"] == renamed             # so the audit can match it by text
+
+
+def test_answer_is_clean_whichever_sections_we_appended():
+    """Their correctness oracle must never see a section we added, or every answer
+    scores wrong. The profile section was handled; the write-count one was not."""
+    from probe.dataflow import parse_writes
+    from probe.parse import parse_reply
+
+    writes_only = "### ANSWER\n[1, 2]\n\n### WRITES\nfound = 2\nout = 3\n"
+    answer, profile = parse_reply(writes_only)
+    assert answer == "[1, 2]"                    # not the whole block
+    assert profile == {}
+    assert parse_writes(writes_only) == {"found": 2, "out": 3}
+
+    both = ("### ANSWER\n[1, 2]\n\n### PROFILE\nloop1 (line 3) iterations = 4\n"
+            "\n### WRITES\nfound = 2\n")
+    answer, profile = parse_reply(both)
+    assert answer == "[1, 2]"
+    assert profile == {"loop1": (4,)}            # the profile is not polluted either
+    assert parse_writes(both) == {"found": 2}
+
+
+def test_smoke_path_passes_end_to_end():
+    """The whole path, prompt to score, with a stand-in model. This is the check that would
+    have caught the prompt and splitter bugs before they reached a GPU."""
+    from probe.smoke import main
+
+    assert main() == 0
+
+
+def test_write_count_score_separates_the_guessable_variables(tmp_path, capsys):
+    """A variable whose write count equals a figure the loop counts already give could be
+    got right by guessing, so it must not be mixed into the headline."""
+    import json
+    import types
+
+    from probe.build_writes import score_writes
+
+    code_a = "def f(a):\n    found = 0\n    for x in a:\n        found += 1\n    return found"
+    code_b = "def f(b):\n    out = []\n    for y in b:\n        out.append(y)\n    return out"
+
+    writes = tmp_path / "writes.jsonl"
+    with open(writes, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"task_id": "t1", "versions": {"no_mutation": {
+            "code": code_a, "all_writes": {}, "informative": {"found": 4},
+            "asked": ["found"], "guessable_from_the_loop_counts": ["found"]}}}) + "\n")
+        handle.write(json.dumps({"task_id": "t2", "versions": {"no_mutation": {
+            "code": code_b, "all_writes": {}, "informative": {"out": 7},
+            "asked": ["out"], "guessable_from_the_loop_counts": []}}}) + "\n")
+
+    log = tmp_path / "profiles_no_mutation.jsonl"
+    with open(log, "w", encoding="utf-8") as handle:
+        for code, reply in ((code_a, "### ANSWER\n3\n\n### WRITES\nfound = 4\n"),
+                            (code_b, "### ANSWER\n[1,2]\n\n### WRITES\nout = 2\n")):
+            handle.write(json.dumps({"full_sol": code, "test_input": "[]",
+                                     "raw_reply": reply, "profile": {}}) + "\n")
+
+    score_writes(types.SimpleNamespace(writes=str(writes), log=[str(log)],
+                                       version=["no_mutation"]))
+    printed = capsys.readouterr().out
+    assert "could be guessed from the loop counts  1/1" in printed
+    assert "could not be guessed                   0/1" in printed
+
+
+def test_write_count_errors_prefer_the_simpler_explanation():
+    """A counter written `n = 0` then `n += 1` has a write count one above its final value,
+    so "said the value" and "out by one" coincide for every counter. The simpler reading has
+    to win, or the value category swallows them all."""
+    from probe.writes_errors import kind_of_error
+
+    assert kind_of_error(3, 4, 3) == "out by one"            # both fit; out by one wins
+    assert kind_of_error(372359, 2, 372359) == "gave the variable's value, not how often it changed"
+    assert kind_of_error(9, 78, [0] * 9) == "gave the variable's length, not how often it changed"
+    assert kind_of_error(1, 34, "zzz") == "said it changed once when it changed many times"
+    # a match of 0 or 1 is not informative: saying 1 is a common failure on its own, and a
+    # one-element list has length 1, so those must not be credited to the value or length
+    # categories
+    assert kind_of_error(1, 14, "s") == "said it changed once when it changed many times"
+    assert kind_of_error(1, 3, [1]) == "said it changed once when it changed many times"
+    assert kind_of_error(0, 3, 0) == "said it never changed when it did"
+    # the same mistake when the variable holds its digits as text
+    assert kind_of_error(372359, 2, "372359") == "gave the variable's value, not how often it changed"
+    assert kind_of_error(91, 10, None) == "far too high"
+    assert kind_of_error(5, 78, None) == "far too low"
+    assert kind_of_error(7, 5, None) == "miscounted, no pattern"
+    assert kind_of_error(4, 4, 4) == "not a mistake"
+    # True == 1 in Python, so a boolean must not be read as the value 1
+    assert kind_of_error(1, 9, True) == "said it changed once when it changed many times"
+
+
+def test_variable_roles_take_the_strongest_signal():
+    """Every variable is assigned once at the top before being used, so first-match ordering
+    labelled everything "reassigned outright"."""
+    from probe.writes_errors import roles
+
+    code = ("def f(nums):\n"
+            "    counts = {}\n"
+            "    out = []\n"
+            "    total = 0\n"
+            "    joined = ''\n"
+            "    for n in nums:\n"
+            "        counts[n] = 1\n"
+            "        out.append(n)\n"
+            "        total += 1\n"
+            "        joined += str(n)\n"
+            "    return counts, out, total, joined")
+
+    where = roles(code)
+    assert where["n"] == "the loop's own variable"
+    assert where["out"] == "collection built by a method call"
+    assert where["total"] == "counter stepped by a constant"
+    assert where["joined"] == "accumulated with +="
+    assert where["counts"] == "filled by index or key"
+
+
+def test_reasoning_check_survives_renaming_and_grades_like_mucoco():
+    """Renaming changes every variable name, so write counts cannot be matched by name.
+    Comparing the sorted counts keeps a renamed mutant from looking like a disagreement."""
+    from probe.reasoning import write_text, write_verdict
+
+    original = {"raw_reply": "### ANSWER\n3\n\n### WRITES\nfound = 4\nout = 2\n"}
+    renamed = {"raw_reply": "### ANSWER\n3\n\n### WRITES\nvar1 = 4\nvar3 = 2\n"}
+    assert write_text(original) == write_text(renamed) == "2,4"
+
+    # and a real disagreement still shows
+    different = {"raw_reply": "### ANSWER\n3\n\n### WRITES\nvar1 = 9\nvar3 = 2\n"}
+    assert write_text(different) != write_text(original)
+
+    asked, real = ["found", "out"], {"found": 4, "out": 2}
+    assert write_verdict(original, asked, real) == "correct"
+    assert write_verdict(original, asked, {"found": 4, "out": 9}) == "incorrect"
+    assert write_verdict(original, ["found", "out", "x"], {**real, "x": 1}) == "invalid"
+    assert write_verdict(original, [], {}) == "skipped"     # nothing worth asking about
+    assert write_verdict(None, asked, real) == "skipped"    # no reply at all
+
+
+def test_both_questions_survive_one_reply():
+    """Overlap between the two signals can only be measured when both fields come from the
+    same reply about the same program, so one prompt has to carry both sections."""
+    from probe.dataflow import BothPrompt, parse_writes
+    from probe.parse import parse_reply
+
+    base = "Predict the output.\n\n{full_sol}\n\nInput: {test_input}\n\n# Your answer"
+    code = ("def f(rows):\n    found = 0\n    for row in rows:\n        if row > 0:\n"
+            "            found += 1\n    return found")
+
+    prompt = BothPrompt(lambda: base, {code: ["found"]})().format(full_sol=code,
+                                                                  test_input="[1, -2]")
+    # all three sections asked for, in the order answer, loops and branches, variables
+    assert prompt.index("### ANSWER") < prompt.index("### PROFILE") < prompt.index("### WRITES")
+    assert "loop1" in prompt and "if1" in prompt and "found = ?" in prompt
+
+    reply = ("### ANSWER\n1\n\n### PROFILE\nloop1 (line 3) iterations = 2\n"
+             "if1 (line 4) taken = 1, not taken = 1\n\n### WRITES\nfound = 2\n")
+    answer, profile = parse_reply(reply)
+    assert answer == "1"                                  # their parser gets only the answer
+    assert profile == {"loop1": (2,), "if1": (1, 1)}
+    assert parse_writes(reply) == {"found": 2}
+
+    # a program with no variable worth asking about gets two sections, not three
+    plain = "def f(n):\n    return n * 2"
+    only_two = BothPrompt(lambda: base, {})().format(full_sol=plain, test_input="4")
+    assert "### WRITES" not in only_two and "### PROFILE" in only_two

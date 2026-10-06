@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 
+from probe.dataflow import MARK as WRITES_MARK
 from probe.prompt import ANSWER_MARK, PROFILE_MARK
 
 # loop3 iterations = 4      |      if2 taken = 1, else = 0
@@ -26,10 +27,18 @@ _TRAILING = re.compile(r"^\s*(loop\d+|if\d+)\b.*?(-?\d+)\s*$", re.IGNORECASE)
 
 
 def split_sections(reply: str) -> tuple[str, str]:
-    """Return (answer text, profile text). Either can be empty if the model ignored the format."""
+    """Return (answer text, profile text). Either can be empty if the model ignored the format.
+
+    Any section we appended has to be cut off before the answer goes to their parser, not
+    only the profile: a data-flow run appends `### WRITES` instead, and leaving it attached
+    would hand their correctness oracle the whole block and score every answer wrong.
+    """
     profile = ""
     if PROFILE_MARK in reply:
         reply, profile = reply.split(PROFILE_MARK, 1)
+    # the variable-update section, when a data-flow run put one there
+    reply = reply.split(WRITES_MARK, 1)[0]
+    profile = profile.split(WRITES_MARK, 1)[0]
     answer = reply.split(ANSWER_MARK, 1)[-1] if ANSWER_MARK in reply else reply
     return answer.strip(), profile.strip()
 

@@ -1,4 +1,4 @@
-"""Build and score the write-count ground truth.
+"""Build and score the variable-update ground truth.
 
 `build` traces every task and every mutant a second time, recording how many times each
 variable changed, then keeps only the variables worth asking about. `score` compares a run's
@@ -108,6 +108,11 @@ def score_writes(args) -> None:
                 rows[(row["task_id"], version)] = entry
 
     outcomes = {"correct": 0, "wrong": 0, "not answered": 0, "no reply": 0}
+    # A variable whose variable update happens to equal a figure the control-flow side already
+    # reports could be got right by guessing, so the two groups are scored separately and
+    # the headline is the one a guess could not reach.
+    guessable = {"correct": 0, "wrong": 0, "not answered": 0}
+    rest = {"correct": 0, "wrong": 0, "not answered": 0}
     errors = []
 
     for log_path, version in zip(args.log, args.version):
@@ -127,15 +132,27 @@ def score_writes(args) -> None:
             if claimed is None:
                 outcomes["no reply"] += len(wanted)
                 continue
+            lucky = set(entry.get("guessable_from_the_loop_counts") or [])
             for name, verdict in score(claimed, wanted).items():
                 outcomes[verdict] += 1
+                (guessable if name in lucky else rest)[verdict] += 1
                 if verdict == "wrong":
                     errors.append((task, name, claimed.get(name), wanted[name]))
 
     total = sum(outcomes.values())
-    print(f"=== write counts: {total} variables asked about ===")
+    print(f"=== variable updates: {total} variables asked about ===")
     for name, count in outcomes.items():
         print(f"  {name:14s} {rate(count, total)}")
+
+    answered = outcomes["correct"] + outcomes["wrong"]
+    if answered:
+        print(f"\n  of the ones it answered: {rate(outcomes['correct'], answered)}")
+
+    for label, group in (("could be guessed from the loop counts", guessable),
+                         ("could not be guessed", rest)):
+        answered = group["correct"] + group["wrong"]
+        if answered:
+            print(f"  {label:38s} {rate(group['correct'], answered)}")
     if errors:
         print("\n  the worst of them")
         for task, name, said, really in sorted(errors, key=lambda e: -abs((e[2] or 0) - e[3]))[:8]:

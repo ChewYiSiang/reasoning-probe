@@ -389,3 +389,58 @@ can run those instead:
 The output is the same shape as `build_truth_mucoco` writes, so every scoring tool reads
 it unchanged. This is also the route for mutations that change behaviour, where the
 original's counts do not apply to the mutant at all.
+
+
+## Before any GPU run: the smoke test
+
+    python -m probe.smoke
+
+Renders the real prompts for real programs, fakes a reply that follows them, and pushes it
+through the same splitter, logger and scorer a run uses. Exits non-zero on the first thing
+that would lose the answer or the added section. It caught both of the bugs that cost a run
+before it existed: a prompt that never asked for an answer, and a splitter that left the
+write-count section attached to the answer.
+
+It does not cover GPU memory, which only shows up on a real card.
+
+
+## Why a write count was wrong
+
+The loop-count side reports the kind of mistake and sometimes its cause, which is what makes
+it useful rather than just a rate. This does the same for the data-flow side.
+
+    python -m probe.writes_errors --writes results/truth/writes.jsonl \
+        --log results/qwen14b_writes/profiles_no_mutation.jsonl \
+        results/qwen14b_writes/profiles_sequential.jsonl \
+        --version no_mutation sequential
+
+Two tables come out. The first is the kind of mistake: whether the model gave the variable's
+value or its length instead of how many times it changed, was out by one, or simply
+miscounted. The second is accuracy by what the variable is used for, read from the syntax
+tree: a counter stepped by a constant, a collection built by append, a string accumulated
+with +=, a dictionary filled by key.
+
+One ordering decision worth knowing. A counter written `n = 0` then `n += 1` once per pass
+has a write count exactly one above its final value, so "gave the value" and "out by one"
+fit every counter in the benchmark. Out by one is checked first, so the simpler reading wins
+and the value category does not swallow them.
+
+
+## One reasoning check
+
+MuCoCo asks whether the answer survives a rewrite that cannot change it. This asks whether
+the model's account of how the program ran survives the same rewrite. The loops and branches
+it reports and the write counts it gives are both part of that one account, so they are one
+check: the pair is flagged when either disagrees between versions.
+
+    python -m probe.reasoning --truth results/truth/cruxeval.jsonl \
+        --writes results/truth/writes.jsonl \
+        --results-dir results/qwen14b_writes --probe-dir results/qwen14b_writes \
+        --mutation sequential
+
+The table compares it against MuCoCo's answer check and against the control-flow part alone,
+so the question "does the data-flow half add anything" has a number rather than an opinion.
+
+Renaming changes every variable name, so the write counts are compared as a sorted list of
+numbers rather than by name. Two variables swapping counts would look identical; that is the
+price of not needing a name mapping between the versions.
