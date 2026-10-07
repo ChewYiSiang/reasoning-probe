@@ -156,15 +156,20 @@ def main() -> None:
         print("no comparable pairs: check the folders and the mutation name")
         return
 
-    print(f"=== {args.mutation}: {pairs} pairs, {rate(wrong, pairs)} with something wrong ===\n")
-    print(f"{'check':34s}{'flags':>8}{'of those, really wrong':>26}{'of all wrong, found':>22}")
+    print(f"=== {args.mutation}: {pairs} pairs, {rate(wrong, pairs)} where the model got "
+          f"the execution wrong ===\n")
+    # one figure per line: the fixed-width table ran the columns together, so 168 flags
+    # followed by 166/168 read as the single number 168166
     for label, flagged, found in (
             ("answers disagree (MuCoCo)", "answers disagree", "answers disagree, and wrong"),
             ("control flow disagrees", "control flow disagrees", "control flow disagrees, and wrong"),
             ("reasoning disagrees (both fields)", "reasoning disagrees", "reasoning disagrees, and wrong"),
             ("either check fires", "either check fires", "either fires, and wrong")):
         n, hit = stats[flagged], stats[found]
-        print(f"  {label:32s}{n:>8}{rate(hit, n) if n else 'n/a':>26}{rate(hit, wrong):>22}")
+        print(f"  {label}")
+        print(f"      flags                  {n}")
+        print(f"      of those, really wrong {rate(hit, n) if n else 'n/a'}")
+        print(f"      of all wrong, found    {rate(hit, wrong)}")
 
     print(f"\n  pairs only the reasoning check finds, that are really wrong: "
           f"{rate(stats['only the reasoning check'], wrong)}")

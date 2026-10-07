@@ -26,10 +26,14 @@ def build_writes(args) -> None:
 
     # The truth builder already knows how to read both sources; use its loaders rather
     # than a second, slightly different copy of the same logic.
-    from probe.build_truth_mucoco import load_from_jsonl, load_from_mongo
+    from probe.build_truth_mucoco import load_from_jsonl, load_from_mongo, load_from_offline
 
     if args.source == "mongo":
         tasks = load_from_mongo(args.limit)
+    elif args.source == "offline":
+        if not args.tasks:
+            raise SystemExit("--source offline needs --tasks pointing at the exported task file")
+        tasks = load_from_offline(args.tasks, args.limit)
     else:
         if not args.tasks:
             raise SystemExit("--source jsonl needs --tasks pointing at the CRUXEval file")

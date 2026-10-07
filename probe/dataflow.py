@@ -242,8 +242,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser("build", help="trace variable updates for every task and version")
-    build.add_argument("--source", choices=["mongo", "jsonl"], default="mongo")
-    build.add_argument("--tasks", help="exported task file when --source jsonl")
+    build.add_argument("--source", choices=["mongo", "jsonl", "offline"], default="mongo")
+    build.add_argument("--tasks", help="task file when --source jsonl or offline")
     build.add_argument("--truth", required=True, help="the control-flow truth file")
     build.add_argument("--limit", type=int, default=800)
     build.add_argument("--mutations", nargs="*", default=["sequential", "constant_unfold_add"])

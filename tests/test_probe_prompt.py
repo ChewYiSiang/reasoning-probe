@@ -888,3 +888,35 @@ def test_both_questions_survive_one_reply():
     plain = "def f(n):\n    return n * 2"
     only_two = BothPrompt(lambda: base, {})().format(full_sol=plain, test_input="4")
     assert "### WRITES" not in only_two and "### PROFILE" in only_two
+
+
+def test_preflight_stops_a_run_that_would_ask_nothing(tmp_path):
+    """Ten operators ran for three hours and only two carried the variable question: the
+    lookup file had been built for two operators, and the rest silently got a prompt
+    without it. This is the check that would have stopped it in three seconds."""
+    import json
+
+    import pytest
+
+    from probe.preflight import WouldBeSilent, check, versions_in
+
+    writes = tmp_path / "writes.jsonl"
+    with open(writes, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"task_id": "t1", "versions": {
+            "no_mutation": {"code": "def f(): pass", "asked": ["x"],
+                            "informative": {"x": 1}, "all_writes": {}},
+            "sequential": {"code": "def f(): pass  # renamed", "asked": ["var1"],
+                           "informative": {"var1": 1}, "all_writes": {}},
+        }}) + "\n")
+
+    assert versions_in(writes) == {"no_mutation", "sequential"}
+
+    # the operators that were actually run
+    with pytest.raises(WouldBeSilent) as stopped:
+        check(writes, ["random", "for2while", "demorgan", "sequential"])
+    message = str(stopped.value)
+    assert "random" in message and "for2while" in message and "demorgan" in message
+    assert "sequential" not in message.split("\n")[0]      # the one that works is not blamed
+    assert "rebuild it with" in message                    # and it says how to fix it
+
+    check(writes, ["sequential"])                          # the covered one passes

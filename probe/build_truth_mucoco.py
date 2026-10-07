@@ -40,6 +40,21 @@ def load_from_mongo(limit: int | None) -> list[Task]:
     return [task_from_record(record) for record in cursor]
 
 
+def load_from_offline(path: str, limit: int | None) -> list[Task]:
+    """The task file exported by probe.offline_db, which is what Colab has.
+
+    Same records as the database, already serialised, so the same reader applies. Without
+    this the ground truth can only be rebuilt on a machine that can reach Mongo.
+    """
+    from probe.offline_db import load
+
+    collection = load(path)
+    records = list(collection.find({}))
+    if limit:
+        records = records[:limit]
+    return [task_from_record(record) for record in records]
+
+
 def load_from_jsonl(path: str, limit: int | None) -> list[Task]:
     """Fallback source: the raw CRUXEval file, shaped like a database record."""
     tasks: list[Task] = []
