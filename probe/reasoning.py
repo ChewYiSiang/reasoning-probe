@@ -142,6 +142,7 @@ def main() -> None:
         if wrong:
             stats["answers disagree, and wrong"] += bool(answers)
             stats["control flow disagrees, and wrong"] += bool(profiles)
+            stats["variable updates disagree, and wrong"] += bool(counts)
             stats["reasoning disagrees, and wrong"] += reasoning
             stats["either fires, and wrong"] += bool(answers) or reasoning
             if reasoning and not answers:
@@ -163,6 +164,8 @@ def main() -> None:
     for label, flagged, found in (
             ("answers disagree (MuCoCo)", "answers disagree", "answers disagree, and wrong"),
             ("control flow disagrees", "control flow disagrees", "control flow disagrees, and wrong"),
+            ("variable updates disagree", "variable updates disagree",
+             "variable updates disagree, and wrong"),
             ("reasoning disagrees (both fields)", "reasoning disagrees", "reasoning disagrees, and wrong"),
             ("either check fires", "either check fires", "either fires, and wrong")):
         n, hit = stats[flagged], stats[found]
@@ -176,8 +179,13 @@ def main() -> None:
     print(f"  of those, found by the variable updates and not the control flow: "
           f"{stats['only the variable updates']}")
     print(f"  pairs nothing finds: {rate(stats['nothing fires'], wrong)}")
-    print(f"\n  variable updates alone flag {stats['variable updates disagree']} pairs; "
-          f"control flow alone flags {stats['control flow disagrees']}")
+    # the two fields are not additive: these three numbers say how much they overlap
+    control, updates = stats["control flow disagrees"], stats["variable updates disagree"]
+    both = control + updates - stats["reasoning disagrees"]
+    print(f"\n  control flow flags {control}, variable updates flag {updates}, "
+          f"both fire on {both}")
+    print(f"  so the overlap is {rate(both, stats['reasoning disagrees'])} of what the "
+          f"reasoning check flags")
 
 
 if __name__ == "__main__":
