@@ -66,11 +66,24 @@ def test_a_list_value_is_not_split_on_its_commas():
 
 
 def test_a_skipped_step_costs_one_step_not_all_of_them():
-    real = [(2, {}), (3, {}), (4, {}), (5, {})]
-    claimed = [(2, {}), (4, {}), (5, {})]
+    """Steps carrying a change, so this measures the skip rather than the free-omission
+    rule below."""
+    real = [(2, {"a": 1}), (3, {"b": 2}), (4, {"c": 3}), (5, {"d": 4})]
+    claimed = [(2, {"a": 1}), (4, {"c": 3}), (5, {"d": 4})]
     result = align(claimed, real)
     assert result["path_distance"] == 1
     assert result["first_path_error"] == 1
+
+
+def test_omitting_a_step_that_changed_nothing_is_free():
+    """The tracer records the loop header re-evaluated and the return, where nothing moves.
+    A model that leaves those out is being terser, not wrong, and the pilot showed every
+    model doing it."""
+    real = [(2, {"a": 1}), (3, {}), (4, {"b": 2}), (3, {}), (5, {})]
+    claimed = [(2, {"a": 1}), (4, {"b": 2})]
+    result = align(claimed, real)
+    assert result["path_exact"], result
+    assert result["values_wrong"] == 0, result
 
 
 def test_the_path_can_be_right_while_the_values_are_wrong():

@@ -120,6 +120,11 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
     claimed_path = [lineno for lineno, _ in claimed]
     real_path = [lineno for lineno, _ in real]
 
+    # a truth step that records no change is one the model may reasonably leave out: the
+    # loop header re-evaluated, a condition re-tested, the return. Skipping one costs
+    # nothing, so a trace is not punished for being terser than the tracer.
+    free_to_skip = [not changed for _, changed in real]
+
     # standard edit distance, kept explicit so the backtrace can report the operations
     rows, cols = len(claimed_path) + 1, len(real_path) + 1
     cost = [[0] * cols for _ in range(rows)]
@@ -127,11 +132,14 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
         cost[i][0] = i
     for j in range(cols):
         cost[0][j] = j
+    for j in range(1, cols):
+        cost[0][j] = cost[0][j - 1] + (0 if free_to_skip[j - 1] else 1)
     for i in range(1, rows):
         for j in range(1, cols):
             same = claimed_path[i - 1] == real_path[j - 1]
+            skip = 0 if free_to_skip[j - 1] else 1
             cost[i][j] = min(cost[i - 1][j] + 1,
-                             cost[i][j - 1] + 1,
+                             cost[i][j - 1] + skip,
                              cost[i - 1][j - 1] + (0 if same else 1))
 
     pairs, i, j = [], len(claimed_path), len(real_path)
@@ -144,7 +152,8 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
             pairs.append((i - 1, None))          # a step the model invented
             i -= 1
         else:
-            pairs.append((None, j - 1))          # a step the model skipped
+            skipped_freely = free_to_skip[j - 1]
+            pairs.append((None, j - 1) if not skipped_freely else (None, None))
             j -= 1
     pairs.reverse()
 
@@ -154,6 +163,8 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
     matched = value_right = value_wrong = 0
     first_value_error = None
     for position, (ci, ri) in enumerate(pairs):
+        if ci is None and ri is None:
+            continue                             # a no-change step the model left out
         if ci is None or ri is None or claimed_path[ci] != real_path[ri]:
             if first_path_error is None:
                 first_path_error = position
