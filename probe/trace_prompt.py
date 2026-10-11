@@ -59,4 +59,27 @@ class TracePrompt:
     def format(self, **input_variables) -> str:
         template = self.base_helper() if callable(self.base_helper) else self.base_helper
         base = template.format(**input_variables)
-        return base.rstrip() + "\n" + section() + "\n"
+        return _append_to_user_turn(base, section())
+
+
+# chat templates put the question in a user turn and then open an assistant turn for the
+# reply. Appending to the end would land the instructions inside the assistant turn, where
+# the model reads them as the opening of its own answer and continues from them instead of
+# following them.
+_TURN_ENDS = ("<|im_end|>",                      # ChatML, used by Qwen
+              "<|eot_id|>",                      # Llama 3
+              "<end_of_turn>",                   # Gemma
+              "[/INST]")                         # Mistral
+
+
+def _append_to_user_turn(base: str, addition: str) -> str:
+    """Put the addition at the end of the user's turn, not after it.
+
+    Falls back to appending when the template carries no chat markers, which is the case
+    for a plain completion prompt.
+    """
+    for marker in _TURN_ENDS:
+        position = base.rfind(marker)
+        if position != -1:
+            return base[:position].rstrip() + "\n" + addition + "\n" + base[position:]
+    return base.rstrip() + "\n" + addition + "\n"
