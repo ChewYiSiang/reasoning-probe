@@ -143,3 +143,14 @@ def test_a_trace_numbered_by_step_is_caught():
     result = align(claimed, real)
     assert not result["path_exact"]
     assert result["path_distance"] > 0
+
+
+def test_the_stored_truth_round_trips_through_the_parser():
+    """The scorer parses the truth back and compares it against the model's parsed value, so
+    a truncated literal would come back as a bare string and poison every later comparison
+    built on it. Found in the first pilot, where long lists were cut at 40 characters."""
+    from probe.trace_truth import as_text
+    code = ("def f(nums):\n    out = []\n    for n in nums:\n"
+            "        out.append((nums.count(n), n))\n    return out\n")
+    real = trace(code, "f", [1, 1, 3, 1, 3, 1])
+    assert parse_trace(as_text(real)) == real

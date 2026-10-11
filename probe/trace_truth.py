@@ -39,10 +39,18 @@ def _alarm(*_):
 _CAN_ALARM = hasattr(signal, "SIGALRM")
 
 
-def _short(value, limit: int = 40) -> str:
-    """A value as the model would be asked to write it, truncated where it is unreasonable."""
+def _short(value, limit: int | None = None) -> str:
+    """A value as text.
+
+    Truncating is for display only. The stored truth must stay a readable Python literal,
+    because the scorer parses it back and compares it against the model's own parsed value:
+    a truncated literal comes back as a bare string and every later comparison that builds
+    on it then fails for a reason that has nothing to do with the model.
+    """
     text = repr(value)
-    return text if len(text) <= limit else text[:limit - 3] + "..."
+    if limit is None or len(text) <= limit:
+        return text
+    return text[:limit - 3] + "..."
 
 
 def _call_like_mucoco(func, test_input):
@@ -133,11 +141,15 @@ def trace(code: str, func_name: str, test_input, *, cap: int = DEFAULT_CAP,
     return [(lineno, changed) for lineno, changed in steps]
 
 
-def as_text(steps: list[tuple[int, dict]]) -> str:
-    """The trace in the form the model is asked to produce."""
+def as_text(steps: list[tuple[int, dict]], limit: int | None = None) -> str:
+    """The trace in the form the model is asked to produce.
+
+    `limit` truncates long values for display. Leave it unset when writing the ground truth,
+    which has to round-trip through the parser unchanged.
+    """
     lines = []
     for lineno, changed in steps:
-        shown = ", ".join(f"{name}={_short(value)}" for name, value in changed.items())
+        shown = ", ".join(f"{name}={_short(value, limit)}" for name, value in changed.items())
         lines.append(f"line {lineno} | {shown}")
     return "\n".join(lines)
 
