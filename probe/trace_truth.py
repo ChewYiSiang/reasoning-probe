@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import inspect
 import signal
 import sys
 
@@ -42,6 +43,22 @@ def _short(value, limit: int = 40) -> str:
     """A value as the model would be asked to write it, truncated where it is unreasonable."""
     text = repr(value)
     return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _call_like_mucoco(func, test_input):
+    """Call the function the way MuCoCo's own validity check does.
+
+    Their helper passes no argument for a stored input of None, unpacks when the function
+    takes several parameters, and passes the value whole otherwise. A call made any other way
+    would trace a different run from the one the model is asked about, so this mirrors
+    probe.truth.call_like_mucoco rather than inventing a second convention.
+    """
+    if test_input is None:
+        return func()
+    signature = inspect.signature(func)
+    if not isinstance(test_input, int) and len(signature.parameters) > 1:
+        return func(*test_input)
+    return func(test_input)
 
 
 def trace(code: str, func_name: str, test_input, *, cap: int = DEFAULT_CAP,
@@ -108,10 +125,7 @@ def trace(code: str, func_name: str, test_input, *, cap: int = DEFAULT_CAP,
         signal.alarm(int(timeout_s) or 1)
     try:
         sys.settrace(tracer)
-        if isinstance(test_input, tuple):
-            namespace[func_name](*test_input)
-        else:
-            namespace[func_name](test_input)
+        _call_like_mucoco(namespace[func_name], test_input)
     finally:
         sys.settrace(None)
         if _CAN_ALARM:
