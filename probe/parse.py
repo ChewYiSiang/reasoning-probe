@@ -62,5 +62,6 @@ def parse_profile(profile_text: str) -> dict[str, tuple[int, ...]]:
 
 
 def parse_reply(reply: str) -> tuple[str, dict[str, tuple[int, ...]]]:
+    """Split a reply into its answer and its profile, the two the tester needs."""
     answer, profile_text = split_sections(reply)
     return answer, parse_profile(profile_text)

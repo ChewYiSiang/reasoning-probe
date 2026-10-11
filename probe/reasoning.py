@@ -1,18 +1,20 @@
 """One reasoning check: does the model's account of the run hold up between two versions?
 
-MuCoCo asks whether the **answer** survives a rewrite that cannot change it. This asks
-whether the **account of how the program ran** survives the same rewrite. Both the loops and
+MuCoCo asks whether the answer survives a rewrite that cannot change it. This asks
+whether the account of how the program ran survives the same rewrite. Both the loops and
 branches it reports, and how many times it says each variable changed, are part of that one
 account, so they are one check rather than two: a pair is flagged when either field
 disagrees between the versions.
 
 The rule is MuCoCo's own three-way one, applied to the account instead of the answer.
 
-Variable names do not survive a renaming mutation: `found` in the original is `var1` in the
-mutant, so the two cannot be matched by name. The variable updates are therefore compared as a
-sorted list of numbers rather than by name, which works under any renaming. Two variables
-swapping counts would look identical, which is the price of not needing a name mapping, and
-is stated rather than hidden.
+Sequential renaming rewrites the function and its parameters but leaves the locals alone:
+`f(nums)` becomes `generic_function1(var1)` while `found` stays `found`. That still breaks
+matching by name on 201 of the 450 tasks, because in those a parameter is among the variables
+worth asking about, and it breaks it everywhere under the random operator. The variable
+updates are therefore compared as a sorted list of numbers, which needs no name mapping. Two
+variables swapping counts would look identical; that is the price, and it is stated rather
+than hidden.
 """
 
 from __future__ import annotations

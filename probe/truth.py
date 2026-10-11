@@ -116,6 +116,7 @@ class _Counter:
 
 
 def _run_with_monitoring(thunk: Callable[[], Any], counter: _Counter) -> Any:
+    """Count line hits with sys.monitoring, the cheap hook on Python 3.12 and later."""
     mon = sys.monitoring
     tool_id = mon.PROFILER_ID
     mon.use_tool_id(tool_id, "reasoning-probe")
@@ -137,6 +138,7 @@ def _run_with_monitoring(thunk: Callable[[], Any], counter: _Counter) -> Any:
 
 
 def _run_with_settrace(thunk: Callable[[], Any], counter: _Counter) -> Any:
+    """The same count via sys.settrace, for interpreters without sys.monitoring."""
     def tracer(frame, event, arg):
         if frame.f_code.co_filename != PROGRAM_FILENAME:
             return None
@@ -199,6 +201,7 @@ def run_traced_call(code: str, func_name: str, test_input: Any, *,
 
 
 def _to_profile(result: Any, counter: "_Counter", constructs) -> Profile:
+    """Turn raw line hits into per-construct counts, using the construct line numbers."""
     prof = Profile(output=result, statement_counts=counter.counts,
                    arc_counts=counter.arcs, steps=counter.steps)
 

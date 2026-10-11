@@ -267,3 +267,33 @@ def test_the_filter_drops_what_each_check_flags(tmp_path):
     assert survives(True, False) == {"t1", "t3"}                 # the answers drop t2 and t4
     assert survives(False, True) == {"t1", "t2"}                 # the reasoning drops t3 and t4
     assert survives(True, True) == {"t1"}                        # either drops three
+
+
+def test_pooling_sums_counts_rather_than_averaging_rates(capsys):
+    """MuCoCo's own tables pool by adding the numerators and denominators once, as their
+    14.82% (21924/147935) shows. Averaging per-operator rates would weight an operator that
+    applies to 48 programs as heavily as one that applies to 800."""
+    from probe.filter import show
+
+    big = {"pairs": 800,
+           "none": {"kept": 800, "flagged": 168, "correct": 417, "answered": 800},
+           "answers": {"kept": 632, "flagged": 0, "correct": 386, "answered": 632},
+           "reasoning": {"kept": 632, "flagged": 100, "correct": 355, "answered": 632},
+           "either": {"kept": 532, "flagged": 0, "correct": 337, "answered": 532}}
+    small = {"pairs": 56,
+             "none": {"kept": 56, "flagged": 12, "correct": 30, "answered": 56},
+             "answers": {"kept": 44, "flagged": 0, "correct": 23, "answered": 44},
+             "reasoning": {"kept": 41, "flagged": 9, "correct": 22, "answered": 41},
+             "either": {"kept": 36, "flagged": 0, "correct": 18, "answered": 36}}
+
+    pooled = {"pairs": big["pairs"] + small["pairs"]}
+    for name in ("none", "answers", "reasoning", "either"):
+        pooled[name] = {k: big[name][k] + small[name][k] for k in big[name]}
+
+    show("2 operators pooled", pooled)
+    printed = capsys.readouterr().out
+
+    # 109/673, not the mean of 100/632 and 9/41
+    assert "16.20%" in printed
+    assert abs((100 / 632 + 9 / 41) / 2 * 100 - 18.9) < 0.5      # what averaging would give
+    assert "18.9" not in printed

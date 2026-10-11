@@ -7,12 +7,12 @@ the tracer can run them.
 
 Three things about this task are worth knowing before reading any result from it.
 
-  * **Two wrong answers are always identical.** With a binary answer, MuCoCo's
+  * Two wrong answers are always identical. With a binary answer, MuCoCo's
     incorrectness-based inconsistency can never fire: one of their three categories is
     structurally unavailable here.
-  * **Agreement happens by chance half the time.** Two independent guesses match 50% of the
+  * Agreement happens by chance half the time: two independent guesses match 50% of the
     time, so the measured consistency rate is floored by luck rather than by competence.
-  * **Their own figure for the task is the lowest of the four**, 6.65% inconsistency at
+  * Their own figure for the task is the lowest of the four, 6.65% inconsistency at
     78.97% accuracy, for exactly these reasons.
 
 So this task is run to show that the profile signal transfers to a second task, not to

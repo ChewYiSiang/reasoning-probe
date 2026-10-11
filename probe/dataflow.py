@@ -132,7 +132,7 @@ def informative(writes: dict[str, int], control_flow_counts: dict[str, tuple[int
     Everything else is kept, including a list built by `append` inside a loop, which is
     changed by the run without ever being assigned inside it.
 
-    A variable is **not** dropped merely because its count happens to equal some unrelated
+    A variable is not dropped merely because its count happens to equal some unrelated
     figure elsewhere in the program. On programs this short small integers collide often,
     and dropping on coincidence threw away most of the data. How often such a collision
     occurs is reported separately by `coincidental`, so the caveat is visible without the

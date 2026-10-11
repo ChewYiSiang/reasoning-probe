@@ -24,6 +24,7 @@ from probe.stats import rate
 
 
 def pooled(truth_path: str, writes_path: str, probe_dir: str, versions: list[str]) -> None:
+    """Print loop and branch accuracy, variable accuracy, and the two pooled by item."""
     # the same loader the other scorers use, so the counts and the matching agree with them
     truth = load_truth(truth_path)
     by_code = {entry["code"]: key for key, entry in truth.items() if entry.get("code")}

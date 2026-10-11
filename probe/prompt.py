@@ -49,6 +49,7 @@ def checklist(code: str) -> str:
 
 
 def profile_section(code: str) -> str:
+    """The checklist block appended to MuCoCo's prompt, or nothing if there is no construct."""
     return INSTRUCTIONS.format(answer_mark=ANSWER_MARK, profile_mark=PROFILE_MARK,
                                checklist=checklist(code))
 

@@ -76,6 +76,58 @@ def measure(sides: tuple[dict, dict], tasks: list[str],
             "correct": correct, "answered": answered}
 
 
+def tally(truth, writes, results_dir: str, probe_dir: str, mutation: str,
+          benchmark: str, prompt_type: str) -> dict:
+    """The four filters' counts for one operator, so several can be summed."""
+    first = load_side(truth, writes, Path(results_dir), Path(probe_dir), "no_mutation",
+                      benchmark, prompt_type)
+    second = load_side(truth, writes, Path(results_dir), Path(probe_dir), mutation,
+                       benchmark, prompt_type)
+    tasks = sorted(task for task in set(first) & set(second)
+                   if inconsistent(first[task]["answer_verdict"], second[task]["answer_verdict"],
+                                   first[task]["answer_text"], second[task]["answer_text"])
+                   is not None)
+    sides = (first, second)
+    out = {"pairs": len(tasks)}
+    for name, drop_a, drop_r in (("none", False, False), ("answers", True, False),
+                                 ("reasoning", False, True), ("either", True, True)):
+        out[name] = measure(sides, tasks, drop_a, drop_r)
+    return out
+
+
+def load_inputs(truth_path: str, writes_path: str):
+    """The traced counts and the variable lookup, the two inputs every filter needs."""
+    truth = load_truth(truth_path)
+    writes: dict = {}
+    with open(writes_path, encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            for version, entry in row["versions"].items():
+                if entry.get("asked"):
+                    writes[(row["task_id"], version)] = entry
+    return truth, writes
+
+
+def show(label: str, totals: dict) -> None:
+    """One table, from counts that may have been summed over several operators."""
+    print(f"=== {label}: {totals['pairs']} pairs, before any filter ===\n")
+    print(f"  {'filter':32s}{'kept':>12}{'inconsistency':>16}{'accuracy':>12}")
+    for name, text in (("none", "none: every pair"),
+                       ("answers", "withhold what the answers flag"),
+                       ("reasoning", "withhold what the reasoning flags"),
+                       ("either", "withhold what either flags")):
+        s = totals[name]
+        if not s["kept"]:
+            print(f"  {text:32s}{'0':>12}")
+            continue
+        share = f"{s['kept']}/{totals['pairs']}"
+        inc = s["flagged"] / s["kept"] * 100
+        acc = s["correct"] / s["answered"] * 100 if s["answered"] else 0.0
+        print(f"  {text:32s}{share:>12}{inc:>15.2f}%{acc:>11.2f}%")
+    print("\n  inconsistency is their formula: flagged pairs over the pairs kept")
+    print("  accuracy is correct answers over answers given, on the original version")
+
+
 def report(truth_path: str, writes_path: str, results_dir: str, probe_dir: str,
            mutation: str, benchmark: str = "CruxEval", prompt_type: str = "zero_shot") -> None:
     truth = load_truth(truth_path)
@@ -92,7 +144,13 @@ def report(truth_path: str, writes_path: str, results_dir: str, probe_dir: str,
                       benchmark, prompt_type)
     second = load_side(truth, writes, Path(results_dir), Path(probe_dir), mutation,
                        benchmark, prompt_type)
-    tasks = sorted(set(first) & set(second))
+    # Only pairs the operator actually produced count. MuCoCo's denominator is the test
+    # cases generated, so a program the mutation could not touch is not a pair at all: its
+    # mutant row carries no model output, and comparing the answers returns nothing.
+    tasks = sorted(task for task in set(first) & set(second)
+                   if inconsistent(first[task]["answer_verdict"], second[task]["answer_verdict"],
+                                   first[task]["answer_text"], second[task]["answer_text"])
+                   is not None)
     sides = (first, second)
 
     print(f"=== {mutation}: {len(tasks)} pairs, before any filter ===\n")
@@ -122,9 +180,28 @@ def main() -> None:
     parser.add_argument("--writes", required=True)
     parser.add_argument("--results-dir", required=True)
     parser.add_argument("--probe-dir", required=True)
-    parser.add_argument("--mutation", default="sequential")
+    parser.add_argument("--mutation", nargs="+", default=["sequential"],
+                        help="one operator, or several to pool into a single fraction")
     args = parser.parse_args()
-    report(args.truth, args.writes, args.results_dir, args.probe_dir, args.mutation)
+
+    if len(args.mutation) == 1:
+        report(args.truth, args.writes, args.results_dir, args.probe_dir, args.mutation[0])
+        return
+
+    truth, writes = load_inputs(args.truth, args.writes)
+    pooled = {"pairs": 0}
+    for mutation in args.mutation:
+        one = tally(truth, writes, args.results_dir, args.probe_dir, mutation,
+                    "CruxEval", "zero_shot")
+        print(f"  {mutation:24s}{one['pairs']:>6} pairs")
+        pooled["pairs"] += one["pairs"]
+        for name in ("none", "answers", "reasoning", "either"):
+            into = pooled.setdefault(name, {})
+            for key, value in one[name].items():
+                if key != "of":
+                    into[key] = into.get(key, 0) + value
+    print()
+    show(f"{len(args.mutation)} operators pooled", pooled)
 
 
 if __name__ == "__main__":

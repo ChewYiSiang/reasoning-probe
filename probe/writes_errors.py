@@ -6,12 +6,12 @@ for the data-flow side.
 
 Two things are reported.
 
-**What kind of mistake it was.** The errors are not mostly off-by-one slips, as they are for
+What kind of mistake it was. The errors are not mostly off-by-one slips, as they are for
 loop counts. A model says `b = 372359` when the variable changed twice, and 372359 is what
 `b` ended up holding. So the first question is whether the model answered a different
 question: the variable's value, or its length, rather than how many times it changed.
 
-**Which kinds of variable go wrong.** A counter built with `+=`, a list built by `append`, a
+Which kinds of variable go wrong. A counter built with `+=`, a list built by `append`, a
 string built by concatenation and a dictionary filled by subscript are four different jobs,
 and a model may track some and not others. The role is read from the syntax tree.
 
