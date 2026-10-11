@@ -86,3 +86,47 @@ def test_a_perfect_trace_reports_no_error():
     result = align(steps, steps)
     assert result["path_exact"] and result["values_exact"]
     assert result["first_path_error"] is None and result["first_value_error"] is None
+
+
+# ----------------------------------------------------------------- from a real pilot reply
+
+APPEND = """def f(nums):
+    output = []
+    for n in nums:
+        output.append((nums.count(n), n))
+    output.sort(reverse=True)
+    return output
+"""
+
+
+def test_restating_an_unchanged_value_is_not_an_error():
+    """A model reports the loop variable on every pass; the trace records it only when it
+    changes. Comparing changes marks the model wrong for being more informative, so the
+    comparison is on state. Taken from a real reply in the first pilot."""
+    real = trace(APPEND, "f", [1, 1, 3])
+    claimed = parse_trace("""### TRACE
+line 1 | nums=[1, 1, 3]
+line 2 | output=[]
+line 3 | n=1
+line 4 | output=[(2, 1)]
+line 3 | n=1
+line 4 | output=[(2, 1), (2, 1)]
+line 3 | n=3
+line 4 | output=[(2, 1), (2, 1), (1, 3)]
+line 3 |
+line 5 | output=[(2, 1), (2, 1), (1, 3)]
+line 6 |""")
+    result = align(claimed, real)
+    assert result["path_exact"], result
+    assert result["values_wrong"] == 0, result
+
+
+def test_a_trace_numbered_by_step_is_caught():
+    """The first pilot reply numbered its steps 1..17 instead of using the program's line
+    numbers, which loses the path while leaving the values looking plausible."""
+    real = trace(APPEND, "f", [1, 1, 3])
+    claimed = parse_trace("### TRACE\n" + "\n".join(
+        f"line {i} | " for i in range(1, len(real) + 1)))
+    result = align(claimed, real)
+    assert not result["path_exact"]
+    assert result["path_distance"] > 0

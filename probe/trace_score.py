@@ -94,6 +94,21 @@ def _split_top_level(text: str) -> list[str]:
 
 # ------------------------------------------------------------------------------- alignment
 
+def _state_at(steps: list[tuple[int, dict]]) -> list[dict]:
+    """What every variable holds after each step, built up from the changes.
+
+    The traces record changes, but a model will often restate a value that has not moved:
+    a loop variable rebound to the same value is reported every pass, while the trace has
+    nothing there because nothing changed. Comparing state rather than changes scores that
+    as right, which it is, and still catches a value that is genuinely wrong.
+    """
+    state, out = {}, []
+    for _, changed in steps:
+        state.update(changed)
+        out.append(dict(state))
+    return out
+
+
 def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict:
     """Where the model's trace first parts from the real one, and how.
 
@@ -133,6 +148,8 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
             j -= 1
     pairs.reverse()
 
+    claimed_state, real_state = _state_at(claimed), _state_at(real)
+
     first_path_error = None
     matched = value_right = value_wrong = 0
     first_value_error = None
@@ -142,7 +159,10 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
                 first_path_error = position
             continue
         matched += 1
-        if claimed[ci][1] == real[ri][1]:
+        # only the variables the model mentioned by this point are judged: it is not wrong
+        # for staying silent about one, only for getting one it named wrong
+        mine, truth = claimed_state[ci], real_state[ri]
+        if all(name in truth and truth[name] == value for name, value in mine.items()):
             value_right += 1
         else:
             value_wrong += 1
