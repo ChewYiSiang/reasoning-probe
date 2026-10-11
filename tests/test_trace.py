@@ -154,3 +154,27 @@ def test_the_stored_truth_round_trips_through_the_parser():
             "        out.append((nums.count(n), n))\n    return out\n")
     real = trace(code, "f", [1, 1, 3, 1, 3, 1])
     assert parse_trace(as_text(real)) == real
+
+
+def test_a_lambda_on_the_same_line_is_not_a_step():
+    """sorted(key=lambda ...) runs the lambda in its own frame on the same source line. The
+    tracer used to record each call as a step on that line, which no model would report."""
+    code = ("def f(dic):\n"
+            "    for k, v in sorted(dic.items(), key=lambda x: len(str(x)))[:-1]:\n"
+            "        dic.pop(k)\n"
+            "    return list(dic.items())\n")
+    steps = trace(code, "f", {"a": 1, "bb": 2, "ccc": 3})
+    on_line_two = [changed for lineno, changed in steps if lineno == 2]
+    assert all("x" not in changed for changed in on_line_two), steps
+
+
+def test_a_parameter_stays_in_the_truth_state_even_though_its_step_is_optional():
+    """The first step binds the parameters. A model does not call that an executed statement,
+    but if the binding is dropped entirely then any later mention of a parameter reads as
+    wrong, which is what the first pilot showed."""
+    code = "def f(xs):\n    n = len(xs)\n    xs = []\n    return n\n"
+    real = trace(code, "f", [1, 2, 3])
+    claimed = parse_trace("### TRACE\nline 2 | n=3\nline 3 | xs=[]\nline 4 |")
+    result = align(claimed, real)
+    assert result["path_exact"], result
+    assert result["values_wrong"] == 0, result

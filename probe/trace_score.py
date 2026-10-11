@@ -124,6 +124,11 @@ def align(claimed: list[tuple[int, dict]], real: list[tuple[int, dict]]) -> dict
     # loop header re-evaluated, a condition re-tested, the return. Skipping one costs
     # nothing, so a trace is not punished for being terser than the tracer.
     free_to_skip = [not changed for _, changed in real]
+    if free_to_skip:
+        # the first step binds the parameters before any statement runs. A model would not
+        # call that an executed statement, but the values have to stay in the truth's state
+        # or every mention of a parameter later reads as wrong.
+        free_to_skip[0] = True
 
     # standard edit distance, kept explicit so the backtrace can report the operations
     rows, cols = len(claimed_path) + 1, len(real_path) + 1

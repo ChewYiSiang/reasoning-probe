@@ -98,12 +98,18 @@ def trace(code: str, func_name: str, test_input, *, cap: int = DEFAULT_CAP,
     def tracer(frame, event, arg):
         """Record the path as it happens, and attach each change to the line that caused it.
 
+        Only the traced function's own frame is recorded. A lambda inside sorted(), or a
+        comprehension, runs in its own frame on the same source line, and a model asked for
+        the execution trace does not report those as separate steps.
+
         f_locals is read at the start of a line, so what it shows was done by the line
         before. Attaching a change to the line currently about to run would put every value
         one step late, and a model writing a correct trace would be marked wrong everywhere.
         """
         nonlocal previous
         if frame.f_code.co_filename != PROGRAM_FILENAME:
+            return None
+        if frame.f_code.co_name != func_name:
             return None
         if event == "call":
             # the parameters are bound before any statement runs, so they belong to the def
