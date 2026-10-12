@@ -178,3 +178,25 @@ def test_a_parameter_stays_in_the_truth_state_even_though_its_step_is_optional()
     result = align(claimed, real)
     assert result["path_exact"], result
     assert result["values_wrong"] == 0, result
+
+
+
+def test_a_prompt_that_already_has_chat_markers_is_not_wrapped_again():
+    """MuCoCo's per-model templates carry their own chat markers. The wrapper used to apply
+    the tokenizer's template on top, nesting a whole conversation inside a user turn: the
+    prompt came out with two <|begin_of_text|> and six <|start_header_id|>. Qwen tolerated
+    it, Llama 3 did not."""
+    markers = ("<|im_start|>", "<|start_header_id|>", "<|begin_of_text|>",
+               "<start_of_turn>", "[INST]")
+    already = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\nhi<|eot_id|>"
+    plain = "Code:\ndef f(): pass\nAnswer:"
+    assert any(m in already for m in markers)
+    assert not any(m in plain for m in markers)
+
+
+def test_the_guard_is_present_in_the_wrapper():
+    """The fix lived only as a notebook patch for a while, so the repo would have lost it on
+    a clean clone. This asserts it is in the source."""
+    import inspect
+    from probe import probe_llm_gpu
+    assert "already_formatted" in inspect.getsource(probe_llm_gpu)

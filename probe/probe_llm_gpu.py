@@ -100,6 +100,15 @@ def profile_transformers_class(load_in_4bit: bool = True, ask_for_profile: bool 
             """
             if not getattr(self.tokenizer, "chat_template", None):
                 return prompt
+            # MuCoCo's per-model templates already carry the chat markers. Wrapping one
+            # again nests a whole conversation inside a user turn, which Llama 3 in
+            # particular does not recover from.
+            already_formatted = any(
+                marker in prompt for marker in
+                ("<|im_start|>", "<|start_header_id|>", "<|begin_of_text|>",
+                 "<start_of_turn>", "[INST]"))
+            if already_formatted:
+                return prompt
             messages = [{"role": "user", "content": prompt}]
             try:
                 return self.tokenizer.apply_chat_template(

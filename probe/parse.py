@@ -10,6 +10,7 @@ import re
 
 from probe.dataflow import MARK as WRITES_MARK
 from probe.prompt import ANSWER_MARK, PROFILE_MARK
+from probe.trace_prompt import TRACE_MARK
 
 # loop3 iterations = 4      |      if2 taken = 1, else = 0
 #
@@ -36,9 +37,12 @@ def split_sections(reply: str) -> tuple[str, str]:
     profile = ""
     if PROFILE_MARK in reply:
         reply, profile = reply.split(PROFILE_MARK, 1)
-    # the variable-update section, when a data-flow run put one there
-    reply = reply.split(WRITES_MARK, 1)[0]
-    profile = profile.split(WRITES_MARK, 1)[0]
+    # every section we append has to be cut, not just the profile: a data-flow run adds
+    # `### WRITES` and a trace run adds `### TRACE`, and either left attached hands their
+    # correctness oracle the whole block and scores every answer wrong
+    for mark in (WRITES_MARK, TRACE_MARK):
+        reply = reply.split(mark, 1)[0]
+        profile = profile.split(mark, 1)[0]
     answer = reply.split(ANSWER_MARK, 1)[-1] if ANSWER_MARK in reply else reply
     return answer.strip(), profile.strip()
 
