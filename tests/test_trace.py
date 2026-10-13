@@ -200,3 +200,23 @@ def test_the_guard_is_present_in_the_wrapper():
     import inspect
     from probe import probe_llm_gpu
     assert "already_formatted" in inspect.getsource(probe_llm_gpu)
+
+
+def test_a_degenerate_tail_is_cut_but_a_real_loop_is_not():
+    """Greedy decoding on a small model runs past the end of the program and repeats the
+    last line until the token budget stops it. A correct trace also repeats lines, as the
+    loop body runs again, so the rule has to separate them: the degenerate tail carries no
+    values, the loop does. A third of LLaMA's pilot failures were this tail."""
+    degenerate = "### TRACE\n" + "\n".join(
+        ["line 2 | x=1", "line 3 | y=2"] + ["line 5 |"] * 40)
+    assert len(parse_trace(degenerate)) == 2
+
+    loop = "### TRACE\n" + "\n".join(
+        f"line {3 if i % 2 == 0 else 4} | x={i}" for i in range(20))
+    assert len(parse_trace(loop)) == 20
+
+
+def test_a_short_run_of_empty_steps_survives():
+    """The tracer records the loop re-tested and the return with nothing changing, so a few
+    empty steps at the end are normal rather than degenerate."""
+    assert len(parse_trace("### TRACE\nline 2 | x=1\nline 3 |\nline 4 |")) == 3

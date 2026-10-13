@@ -22,7 +22,27 @@ _STEP = re.compile(
     re.X)
 
 
-def parse_trace(reply: str, marker: str = "### TRACE") -> list[tuple[int, dict]]:
+def _drop_degenerate_tail(steps, run: int = 4):
+    """Cut a trace where it stops saying anything new.
+
+    A correct trace repeats line numbers, since a loop body runs again and again, which is
+    the whole point. What is not informative is the same line repeated with no value
+    changing, which is what greedy decoding produces when it runs past the end of a program
+    and keeps emitting until the token budget stops it. The degenerate tail carries no
+    values; a real loop does.
+    """
+    if len(steps) <= run:
+        return steps
+    for start in range(len(steps) - run + 1):
+        window = steps[start:start + run]
+        if all(not changed for _, changed in window) and \
+                len({lineno for lineno, _ in window}) == 1:
+            return steps[:start]
+    return steps
+
+
+def parse_trace(reply: str, marker: str = "### TRACE",
+                drop_degenerate: bool = True) -> list[tuple[int, dict]]:
     """Read a trace out of a reply, keeping every line that can be read at all.
 
     Parsed per line rather than per trace: one unreadable step costs that step, not the whole
@@ -40,7 +60,7 @@ def parse_trace(reply: str, marker: str = "### TRACE") -> list[tuple[int, dict]]
             continue
         lineno, rest = int(match.group(1)), match.group(2)
         steps.append((lineno, _assignments(rest)))
-    return steps
+    return _drop_degenerate_tail(steps) if drop_degenerate else steps
 
 
 def _assignments(text: str) -> dict:
